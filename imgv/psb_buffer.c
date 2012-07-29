@@ -30,12 +30,10 @@
 
 struct drm_psb_ttm_tt {
 	struct ttm_dma_tt ttm;
-	/* struct page **pages; */
 	unsigned int desired_tile_stride;
 	unsigned int hw_tile_stride;
 	int mem_type;
 	unsigned long offset;
-	/* unsigned long num_pages; */
 };
 
 /*
@@ -220,19 +218,6 @@ static int psb_move(struct ttm_buffer_object *bo,
 	return 0;
 }
 
-/* static int drm_psb_tbe_populate(struct ttm_tt *backend, */
-/* 				unsigned long num_pages, */
-/* 				struct page **pages, */
-/* 				struct page *dummy_read_page, */
-/* 				dma_addr_t *dma_addrs) */
-/* { */
-/* 	struct drm_psb_ttm_backend *psb_be = */
-/* 	    container_of(backend, struct drm_psb_ttm_tt, ttm); */
-
-/* 	psb_be->pages = pages; */
-/* 	return 0; */
-/* } */
-
 static int drm_psb_tbe_populate(struct ttm_tt *ttm)
 {
 	struct ttm_bo_device *bdev = ttm->bdev;
@@ -377,7 +362,6 @@ static void drm_psb_tbe_unpopulate(struct ttm_tt *ttm)
 static void drm_psb_tbe_destroy(struct ttm_tt *ttm)
 {
 	struct drm_psb_ttm_tt *psb_ttm = (void*) ttm;
-	    /* container_of(ttm, struct drm_psb_ttm_tt, ttm); */
 
 	if (ttm) {
 		ttm_dma_tt_fini(&psb_ttm->ttm);
