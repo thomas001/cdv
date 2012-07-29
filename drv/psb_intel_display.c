@@ -583,9 +583,9 @@ int psb_intel_pipe_set_base(struct drm_crtc *crtc,
 	}
 
 	Start = mode_dev->bo_offset(dev, psbfb);
-	Offset = y * crtc->fb->pitch + x * (crtc->fb->bits_per_pixel / 8);
+	Offset = y * crtc->fb->pitches[0] + x * (crtc->fb->bits_per_pixel / 8);
 
-	REG_WRITE(dspstride, crtc->fb->pitch);
+	REG_WRITE(dspstride, crtc->fb->pitches[0]);
 
 	dspcntr = REG_READ(dspcntr_reg);
 	dspcntr &= ~DISPPLANE_PIXFORMAT_MASK;

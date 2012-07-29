@@ -27,7 +27,12 @@
 #ifndef __SERVICES_PROC_H__
 #define __SERVICES_PROC_H__
 
-#include <asm/system.h>		
+#include <asm/barrier.h>		
+#include <asm/switch_to.h>		
+#include <asm/exec.h>		
+#include <asm/cmpxchg.h>		
+#include <asm/bug.h>		
+#include <asm/auxvec.h>
 #include <linux/proc_fs.h>	
 #include <linux/seq_file.h> 
 

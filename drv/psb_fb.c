@@ -203,7 +203,7 @@ static struct fb_ops psbfb_ops = {
 };
 
 static struct drm_framebuffer *psb_framebuffer_create
-			(struct drm_device *dev, struct drm_mode_fb_cmd *r,
+			(struct drm_device *dev, struct drm_mode_fb_cmd2 *r,
 			 void *mm_private)
 {
 	struct psb_framebuffer *fb;
@@ -231,12 +231,12 @@ err:
 
 static struct drm_framebuffer *psb_user_framebuffer_create
 			(struct drm_device *dev, struct drm_file *filp,
-			 struct drm_mode_fb_cmd *r)
+			 struct drm_mode_fb_cmd2 *r)
 {
 	struct psb_framebuffer *psbfb;
 	struct drm_framebuffer *fb;
 	PVRSRV_KERNEL_MEM_INFO *psKernelMemInfo = IMG_NULL;
-	IMG_HANDLE hKernelMemInfo = (IMG_HANDLE)r->handle;
+	IMG_HANDLE hKernelMemInfo = (IMG_HANDLE)r->handles[0];
 	struct drm_psb_private *dev_priv
 		= (struct drm_psb_private *) dev->dev_private;
 	struct psb_gtt *pg = dev_priv->pg;
@@ -258,7 +258,7 @@ static struct drm_framebuffer *psb_user_framebuffer_create
 
 	/* JB: TODO not drop, make smarter */
 	size = psKernelMemInfo->uAllocSize;
-	if (size < r->height * r->pitch)
+	if (size < r->height * r->pitches[0])
 		return NULL;
 
 	/* JB: TODO not drop, refcount buffer */
@@ -308,18 +308,18 @@ static int psbfb_create(struct psb_fbdev * fbdev, struct drm_fb_helper_surface_s
 	struct fb_info * info;
 	struct drm_framebuffer *fb;
 	struct psb_framebuffer * psbfb;
-	struct drm_mode_fb_cmd mode_cmd;
+	struct drm_mode_fb_cmd2 mode_cmd;
 	struct device * device = &dev->pdev->dev;
 	struct MRSTLFB_BUFFER_TAG *buffer = NULL;
 	int size, aligned_size;
-	int ret, stride;
+	int ret, stride, depth, bpp;
 
 	mode_cmd.width = sizes->surface_width;
 	mode_cmd.height = sizes->surface_height;
 
 	DRM_DEBUG_KMS("psbfb_create called with w = %d h = %d\n", sizes->surface_width, sizes->surface_height);
 
-	mode_cmd.bpp = 32;
+	bpp = 32;
         //HW requires pitch to be 64 byte aligned
         /*
 	 * The framebuffer is used by PVR driver. And it expects that the 
@@ -328,10 +328,11 @@ static int psbfb_create(struct psb_fbdev * fbdev, struct drm_fb_helper_surface_s
 	 * it is aligned to 64 bytes.	
 	 */
         stride = ALIGN(mode_cmd.width, 32);
-        mode_cmd.pitch =  ALIGN(stride * ((mode_cmd.bpp + 1) / 8), 64);
-        mode_cmd.depth = 24;
-
-	size = mode_cmd.pitch * mode_cmd.height;
+        mode_cmd.pitches[0] =  ALIGN(stride * ((bpp + 1) / 8), 64);
+	depth = 24;
+        mode_cmd.pixel_format = drm_mode_legacy_fb_format(bpp, depth);
+	
+	size = mode_cmd.pitches[0] * mode_cmd.height;
 	aligned_size = ALIGN(size, PAGE_SIZE);
 
 	mutex_lock(&dev->struct_mutex);
@@ -398,7 +399,7 @@ static int psbfb_create(struct psb_fbdev * fbdev, struct drm_fb_helper_surface_s
 		info->apertures->ranges[0].size = pg->stolen_size;                                                                   
 	}
 	  
-	drm_fb_helper_fill_fix(info, fb->pitch, fb->depth);
+	drm_fb_helper_fill_fix(info, fb->pitches[0], fb->depth);
 	drm_fb_helper_fill_var(info, &fbdev->psb_fb_helper, sizes->fb_width, sizes->fb_height);
 
 	info->fix.mmio_start = pci_resource_start(dev->pdev, 0);
@@ -411,7 +412,7 @@ static int psbfb_create(struct psb_fbdev * fbdev, struct drm_fb_helper_surface_s
 	info->pixmap.scan_align = 1;
 
 	DRM_DEBUG_KMS("fb depth is %d\n", fb->depth);
-	DRM_DEBUG_KMS("   pitch is %d\n", fb->pitch);
+	DRM_DEBUG_KMS("   pitch is %d\n", fb->pitches[0]);
 	DRM_DEBUG_KMS("allocated %dx%d fb\n", psbfb->base.width, psbfb->base.height);	
 	DRM_DEBUG_KMS("The GTT offset %x for FB ID %d\n", psbfb->offset, fb->base.id);	
 

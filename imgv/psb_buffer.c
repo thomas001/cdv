@@ -20,6 +20,7 @@
  */
 #include "ttm/ttm_placement.h"
 #include "ttm/ttm_execbuf_util.h"
+#include "ttm/ttm_page_alloc.h"
 #include "psb_ttm_fence_api.h"
 #include <drm/drmP.h>
 #include "psb_drv.h"
@@ -27,14 +28,14 @@
 
 #define DRM_MEM_TTM       26
 
-struct drm_psb_ttm_backend {
-	struct ttm_backend base;
-	struct page **pages;
+struct drm_psb_ttm_tt {
+	struct ttm_dma_tt ttm;
+	/* struct page **pages; */
 	unsigned int desired_tile_stride;
 	unsigned int hw_tile_stride;
 	int mem_type;
 	unsigned long offset;
-	unsigned long num_pages;
+	/* unsigned long num_pages; */
 };
 
 /*
@@ -219,133 +220,193 @@ static int psb_move(struct ttm_buffer_object *bo,
 	return 0;
 }
 
-static int drm_psb_tbe_populate(struct ttm_backend *backend,
-				unsigned long num_pages,
-				struct page **pages,
-				struct page *dummy_read_page,
-				dma_addr_t *dma_addrs)
-{
-	struct drm_psb_ttm_backend *psb_be =
-	    container_of(backend, struct drm_psb_ttm_backend, base);
+/* static int drm_psb_tbe_populate(struct ttm_tt *backend, */
+/* 				unsigned long num_pages, */
+/* 				struct page **pages, */
+/* 				struct page *dummy_read_page, */
+/* 				dma_addr_t *dma_addrs) */
+/* { */
+/* 	struct drm_psb_ttm_backend *psb_be = */
+/* 	    container_of(backend, struct drm_psb_ttm_tt, ttm); */
 
-	psb_be->pages = pages;
+/* 	psb_be->pages = pages; */
+/* 	return 0; */
+/* } */
+
+static int drm_psb_tbe_populate(struct ttm_tt *ttm)
+{
+	struct ttm_bo_device *bdev = ttm->bdev;
+	struct drm_psb_private *dev_priv =
+	    container_of(bdev, struct drm_psb_private, bdev);
+	struct drm_psb_ttm_tt *psb_ttm = (void*) ttm;
+	unsigned i;
+	int r;
+
+	if (ttm->state != tt_unpopulated)
+		return 0;
+
+	r = ttm_pool_populate(ttm);
+	if (r) {
+		return r;
+	}
+
+	for (i = 0; i < ttm->num_pages; i++) {
+		psb_ttm->ttm.dma_address[i] = pci_map_page(dev_priv->dev->pdev,
+							   ttm->pages[i],
+							   0, PAGE_SIZE,
+							   PCI_DMA_BIDIRECTIONAL);
+		if (pci_dma_mapping_error(dev_priv->dev->pdev,
+					  psb_ttm->ttm.dma_address[i])) {
+			while (--i) {
+				pci_unmap_page(dev_priv->dev->pdev,
+					       psb_ttm->ttm.dma_address[i],
+					       PAGE_SIZE, PCI_DMA_BIDIRECTIONAL);
+				psb_ttm->ttm.dma_address[i] = 0;
+			}
+			ttm_pool_unpopulate(ttm);
+			return -EFAULT;
+		}
+	}
 	return 0;
 }
 
-static int drm_psb_tbe_unbind(struct ttm_backend *backend)
+static int drm_psb_tbe_unbind(struct ttm_tt *ttm)
 {
-	struct ttm_bo_device *bdev = backend->bdev;
+	struct ttm_bo_device *bdev = ttm->bdev;
 	struct drm_psb_private *dev_priv =
 	    container_of(bdev, struct drm_psb_private, bdev);
-	struct drm_psb_ttm_backend *psb_be =
-	    container_of(backend, struct drm_psb_ttm_backend, base);
+	struct drm_psb_ttm_tt *psb_ttm = (void*) ttm;
+	    /* container_of(ttm, struct drm_psb_ttm_tt, ttm); */
 	struct psb_mmu_pd *pd = psb_mmu_get_default_pd(dev_priv->mmu);
 	/* struct ttm_mem_type_manager *man = &bdev->man[psb_be->mem_type]; */
 
-	if (psb_be->mem_type == TTM_PL_TT) {
+	if (psb_ttm->mem_type == TTM_PL_TT) {
 		uint32_t gatt_p_offset =
-		    (psb_be->offset - dev_priv->pg->mmu_gatt_start) >> PAGE_SHIFT;
+		    (psb_ttm->offset - dev_priv->pg->mmu_gatt_start) >> PAGE_SHIFT;
 
 		(void) psb_gtt_remove_pages(dev_priv->pg, gatt_p_offset,
-					    psb_be->num_pages,
-					    psb_be->desired_tile_stride,
-					    psb_be->hw_tile_stride, 0);
+					    ttm->num_pages,
+					    psb_ttm->desired_tile_stride,
+					    psb_ttm->hw_tile_stride, 0);
 	}
 
-	psb_mmu_remove_pages(pd, psb_be->offset,
-			     psb_be->num_pages,
-			     psb_be->desired_tile_stride,
-			     psb_be->hw_tile_stride);
+	psb_mmu_remove_pages(pd, psb_ttm->offset,
+			     ttm->num_pages,
+			     psb_ttm->desired_tile_stride,
+			     psb_ttm->hw_tile_stride);
 
 	return 0;
 }
 
-static int drm_psb_tbe_bind(struct ttm_backend *backend,
+static int drm_psb_tbe_bind(struct ttm_tt *ttm,
 			    struct ttm_mem_reg *bo_mem)
 {
-	struct ttm_bo_device *bdev = backend->bdev;
+	struct ttm_bo_device *bdev = ttm->bdev;
 	struct drm_psb_private *dev_priv =
 	    container_of(bdev, struct drm_psb_private, bdev);
-	struct drm_psb_ttm_backend *psb_be =
-	    container_of(backend, struct drm_psb_ttm_backend, base);
+	struct drm_psb_ttm_tt *psb_ttm = (void*) ttm;
+	    /* container_of(ttm, struct drm_psb_ttm_tt, ttm); */
 	struct psb_mmu_pd *pd = psb_mmu_get_default_pd(dev_priv->mmu);
 	struct ttm_mem_type_manager *man = &bdev->man[bo_mem->mem_type];
 	int type;
 	int ret = 0;
 
-	psb_be->mem_type = bo_mem->mem_type;
-	psb_be->num_pages = bo_mem->num_pages;
-	psb_be->desired_tile_stride = 0;
-	psb_be->hw_tile_stride = 0;
-	psb_be->offset = (bo_mem->start << PAGE_SHIFT) +
+	psb_ttm->mem_type = bo_mem->mem_type;
+	ttm->num_pages = bo_mem->num_pages;
+	psb_ttm->desired_tile_stride = 0;
+	psb_ttm->hw_tile_stride = 0;
+	psb_ttm->offset = (bo_mem->start << PAGE_SHIFT) +
 	    man->gpu_offset;
 
 	type =
 	    (bo_mem->
 	     placement & TTM_PL_FLAG_CACHED) ? PSB_MMU_CACHED_MEMORY : 0;
 
-	if (psb_be->mem_type == TTM_PL_TT) {
+	if (psb_ttm->mem_type == TTM_PL_TT) {
 		uint32_t gatt_p_offset =
-		    (psb_be->offset - dev_priv->pg->mmu_gatt_start) >> PAGE_SHIFT;
+		    (psb_ttm->offset - dev_priv->pg->mmu_gatt_start) >> PAGE_SHIFT;
 
-		ret = psb_gtt_insert_pages(dev_priv->pg, psb_be->pages,
+		ret = psb_gtt_insert_pages(dev_priv->pg, ttm->pages,
 					   gatt_p_offset,
-					   psb_be->num_pages,
-					   psb_be->desired_tile_stride,
-					   psb_be->hw_tile_stride, type);
+					   ttm->num_pages,
+					   psb_ttm->desired_tile_stride,
+					   psb_ttm->hw_tile_stride, type);
 	}
 
-	ret = psb_mmu_insert_pages(pd, psb_be->pages,
-				   psb_be->offset, psb_be->num_pages,
-				   psb_be->desired_tile_stride,
-				   psb_be->hw_tile_stride, type);
+	ret = psb_mmu_insert_pages(pd, ttm->pages,
+				   psb_ttm->offset, ttm->num_pages,
+				   psb_ttm->desired_tile_stride,
+				   psb_ttm->hw_tile_stride, type);
 	if (ret)
 		goto out_err;
 
 	return 0;
 out_err:
-	drm_psb_tbe_unbind(backend);
+	drm_psb_tbe_unbind(ttm);
 	return ret;
 
 }
 
-static void drm_psb_tbe_clear(struct ttm_backend *backend)
+static void drm_psb_tbe_unpopulate(struct ttm_tt *ttm)
 {
-	struct drm_psb_ttm_backend *psb_be =
-	    container_of(backend, struct drm_psb_ttm_backend, base);
+	struct ttm_bo_device *bdev = ttm->bdev;
+	struct drm_psb_private *dev_priv =
+	    container_of(bdev, struct drm_psb_private, bdev);
+	struct drm_psb_ttm_tt *psb_ttm = (void*) ttm;
+	unsigned i;
 
-	psb_be->pages = NULL;
-	return;
+#ifdef CONFIG_SWIOTLB
+	if (swiotlb_nr_tbl()) {
+		ttm_dma_unpopulate(&psb_ttm->ttm, dev_priv->dev->pdev);
+		return;
+	}
+#endif
+
+	for (i = 0; i < ttm->num_pages; i++) {
+		if (psb_ttm->ttm.dma_address[i]) {
+			pci_unmap_page(dev_priv->dev->pdev,
+				       psb_ttm->ttm.dma_address[i],
+				       PAGE_SIZE, PCI_DMA_BIDIRECTIONAL);
+		}
+	}
+
+	ttm_pool_unpopulate(ttm);
 }
 
-static void drm_psb_tbe_destroy(struct ttm_backend *backend)
-{
-	struct drm_psb_ttm_backend *psb_be =
-	    container_of(backend, struct drm_psb_ttm_backend, base);
 
-	if (backend)
-		kfree(psb_be);
+static void drm_psb_tbe_destroy(struct ttm_tt *ttm)
+{
+	struct drm_psb_ttm_tt *psb_ttm = (void*) ttm;
+	    /* container_of(ttm, struct drm_psb_ttm_tt, ttm); */
+
+	if (ttm) {
+		ttm_dma_tt_fini(&psb_ttm->ttm);
+		kfree(psb_ttm);
+	}
 }
 
 static struct ttm_backend_func psb_ttm_backend = {
-	.populate = drm_psb_tbe_populate,
-	.clear = drm_psb_tbe_clear,
 	.bind = drm_psb_tbe_bind,
 	.unbind = drm_psb_tbe_unbind,
 	.destroy = drm_psb_tbe_destroy,
 };
 
-static struct ttm_backend *drm_psb_tbe_init(struct ttm_bo_device *bdev)
+static struct ttm_tt *drm_psb_tbe_init(struct ttm_bo_device *bdev,
+				       unsigned long size, uint32_t page_flags,
+				       struct page *dummy_read_page)
 {
-	struct drm_psb_ttm_backend *psb_be;
+	struct drm_psb_ttm_tt *psb_ttm;
 
-	psb_be = kzalloc(sizeof(*psb_be), GFP_KERNEL);
-	if (!psb_be)
+	psb_ttm = kzalloc(sizeof(*psb_ttm), GFP_KERNEL);
+	if (!psb_ttm)
 		return NULL;
-	psb_be->pages = NULL;
-	psb_be->base.func = &psb_ttm_backend;
-	psb_be->base.bdev = bdev;
-	return &psb_be->base;
+	psb_ttm->ttm.ttm.func = &psb_ttm_backend;
+	psb_ttm->ttm.ttm.pages = NULL;
+
+	if(ttm_dma_tt_init(&psb_ttm->ttm, bdev, size, page_flags, dummy_read_page)) {
+		return NULL;
+	}
+	return &psb_ttm->ttm.ttm;
 }
 
 static int psb_ttm_io_mem_reserve(struct ttm_bo_device *bdev, struct ttm_mem_reg *mem)
@@ -426,7 +487,9 @@ struct ttm_bo_driver psb_ttm_bo_driver = {
 	.num_mem_type_prio = ARRAY_SIZE(psb_mem_prios),
 	.num_mem_busy_prio = ARRAY_SIZE(psb_busy_prios),
 */
-	.create_ttm_backend_entry = &drm_psb_tbe_init,
+	.ttm_tt_create = &drm_psb_tbe_init,
+	.ttm_tt_populate = &drm_psb_tbe_populate,
+	.ttm_tt_unpopulate = &drm_psb_tbe_unpopulate,
 	.invalidate_caches = &psb_invalidate_caches,
 	.init_mem_type = &psb_init_mem_type,
 	.evict_flags = &psb_evict_mask,

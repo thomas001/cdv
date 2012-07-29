@@ -39,7 +39,11 @@ extern "C" {
 #if defined(__linux__) && defined(__KERNEL__)
 #include <linux/hardirq.h>
 #include <linux/string.h>
-#include <asm/system.h>
+#include <asm/barrier.h>
+#include <asm/switch_to.h>
+#include <asm/cmpxchg.h>
+#include <asm/bug.h>
+#include <asm/auxvec.h>
 #if defined(__arm__)
 #include <asm/memory.h>
 #endif

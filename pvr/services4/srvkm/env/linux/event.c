@@ -35,7 +35,12 @@
 #include <asm/io.h>
 #include <asm/page.h>
 #if (LINUX_VERSION_CODE >= KERNEL_VERSION(2,6,22))
-#include <asm/system.h>
+#include <asm/barrier.h>
+#include <asm/switch_to.h>
+#include <asm/exec.h>
+#include <asm/cmpxchg.h>
+#include <asm/bug.h>
+#include <asm/auxvec.h>
 #endif
 #include <linux/mm.h>
 #include <linux/slab.h>

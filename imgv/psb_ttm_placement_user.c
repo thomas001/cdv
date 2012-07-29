@@ -34,7 +34,7 @@ struct ttm_bo_user_object {
 	struct ttm_buffer_object bo;
 };
 
-static size_t pl_bo_size;
+/* static size_t pl_bo_size; */
 
 static uint32_t psb_busy_prios[] = {
 	TTM_PL_TT,
@@ -46,18 +46,18 @@ static uint32_t psb_busy_prios[] = {
 
 const struct ttm_placement default_placement = {0, 0, 0, NULL, 5, psb_busy_prios};
 
-static size_t ttm_pl_size(struct ttm_bo_device *bdev, unsigned long num_pages)
-{
-	size_t page_array_size =
-	    (num_pages * sizeof(void *) + PAGE_SIZE - 1) & PAGE_MASK;
+/* static size_t ttm_pl_size(struct ttm_bo_device *bdev, unsigned long num_pages) */
+/* { */
+/* 	size_t page_array_size = */
+/* 	    (num_pages * sizeof(void *) + PAGE_SIZE - 1) & PAGE_MASK; */
 
-	if (unlikely(pl_bo_size == 0)) {
-		pl_bo_size = bdev->glob->ttm_bo_extra_size +
-		    ttm_round_pot(sizeof(struct ttm_bo_user_object));
-	}
+/* 	if (unlikely(pl_bo_size == 0)) { */
+/* 		pl_bo_size = bdev->glob->ttm_bo_extra_size + */
+/* 		    ttm_round_pot(sizeof(struct ttm_bo_user_object)); */
+/* 	} */
 
-	return bdev->glob->ttm_bo_size + 2 * page_array_size;
-}
+/* 	return bdev->glob->ttm_bo_size + 2 * page_array_size; */
+/* } */
 
 static struct ttm_bo_user_object *ttm_bo_user_lookup(struct ttm_object_file
 						     *tfile, uint32_t handle)
@@ -102,7 +102,7 @@ static void ttm_bo_user_destroy(struct ttm_buffer_object *bo)
 	struct ttm_bo_user_object *user_bo =
 	    container_of(bo, struct ttm_bo_user_object, bo);
 
-	ttm_mem_global_free(bo->glob->mem_glob, bo->acc_size);
+	/* ttm_mem_global_free(bo->glob->mem_glob, bo->acc_size); */
 	kfree(user_bo);
 }
 
@@ -153,14 +153,14 @@ static void ttm_pl_fill_rep(struct ttm_buffer_object *bo,
 }
 
 /* FIXME Copy from upstream TTM */
-static inline size_t ttm_bo_size(struct ttm_bo_global *glob,
-				 unsigned long num_pages)
-{
-	size_t page_array_size = (num_pages * sizeof(void *) + PAGE_SIZE - 1) &
-	    PAGE_MASK;
+/* static inline size_t ttm_bo_size(struct ttm_bo_global *glob, */
+/* 				 unsigned long num_pages) */
+/* { */
+/* 	size_t page_array_size = (num_pages * sizeof(void *) + PAGE_SIZE - 1) & */
+/* 	    PAGE_MASK; */
 
-	return glob->ttm_bo_size + 2 * page_array_size;
-}
+/* 	return glob->ttm_bo_size + 2 * page_array_size; */
+/* } */
 
 /* FIXME Copy from upstream TTM "ttm_bo_create", upstream TTM does not export this, so copy it here */
 static int ttm_bo_create_private(struct ttm_bo_device *bdev,
@@ -174,19 +174,14 @@ static int ttm_bo_create_private(struct ttm_bo_device *bdev,
 			struct ttm_buffer_object **p_bo)
 {
 	struct ttm_buffer_object *bo;
-	struct ttm_mem_global *mem_glob = bdev->glob->mem_glob;
 	int ret;
 
-	size_t acc_size =
-	    ttm_bo_size(bdev->glob, (size + PAGE_SIZE - 1) >> PAGE_SHIFT);
-	ret = ttm_mem_global_alloc(mem_glob, acc_size, false, false);
-	if (unlikely(ret != 0))
-		return ret;
+	size_t acc_size = ttm_bo_acc_size(bdev, size,
+					  sizeof(struct ttm_bo_user_object));
 
 	bo = kzalloc(sizeof(*bo), GFP_KERNEL);
 
 	if (unlikely(bo == NULL)) {
-		ttm_mem_global_free(mem_glob, acc_size);
 		return -ENOMEM;
 	}
 
@@ -270,25 +265,21 @@ int ttm_pl_create_ioctl(struct ttm_object_file *tfile,
 	struct ttm_bo_user_object *user_bo;
 	uint32_t flags;
 	int ret = 0;
-	struct ttm_mem_global *mem_glob = bdev->glob->mem_glob;
+
 	struct ttm_placement placement = default_placement;
-	size_t acc_size =
-	    ttm_pl_size(bdev, (req->size + PAGE_SIZE - 1) >> PAGE_SHIFT);
-	ret = ttm_mem_global_alloc(mem_glob, acc_size, false, false);
-	if (unlikely(ret != 0))
-		return ret;
+	size_t acc_size = ttm_bo_acc_size(bdev, req->size,
+					  sizeof(struct ttm_bo_user_object));
+	    /* ttm_pl_size(bdev, (req->size + PAGE_SIZE - 1) >> PAGE_SHIFT); */
 
 	flags = req->placement;
 	user_bo = kzalloc(sizeof(*user_bo), GFP_KERNEL);
 	if (unlikely(user_bo == NULL)) {
-		ttm_mem_global_free(mem_glob, acc_size);
 		return -ENOMEM;
 	}
 
 	bo = &user_bo->bo;
 	ret = ttm_read_lock(lock, true);
 	if (unlikely(ret != 0)) {
-		ttm_mem_global_free(mem_glob, acc_size);
 		kfree(user_bo);
 		return ret;
 	}
@@ -346,23 +337,18 @@ int ttm_pl_ub_create_ioctl(struct ttm_object_file *tfile,
 	struct ttm_bo_user_object *user_bo;
 	uint32_t flags;
 	int ret = 0;
-	struct ttm_mem_global *mem_glob = bdev->glob->mem_glob;
 	struct ttm_placement placement = default_placement;
 	size_t acc_size =
-	    ttm_pl_size(bdev, (req->size + PAGE_SIZE - 1) >> PAGE_SHIFT);
-	ret = ttm_mem_global_alloc(mem_glob, acc_size, false, false);
-	if (unlikely(ret != 0))
-		return ret;
+		ttm_bo_acc_size(bdev, req->size, sizeof(struct ttm_bo_user_object));
+	    /* ttm_pl_size(bdev, (req->size + PAGE_SIZE - 1) >> PAGE_SHIFT); */
 
 	flags = req->placement;
 	user_bo = kzalloc(sizeof(*user_bo), GFP_KERNEL);
 	if (unlikely(user_bo == NULL)) {
-		ttm_mem_global_free(mem_glob, acc_size);
 		return -ENOMEM;
 	}
 	ret = ttm_read_lock(lock, true);
 	if (unlikely(ret != 0)) {
-		ttm_mem_global_free(mem_glob, acc_size);
 		kfree(user_bo);
 		return ret;
 	}
@@ -374,7 +360,7 @@ int ttm_pl_ub_create_ioctl(struct ttm_object_file *tfile,
 	ret = ttm_bo_init(bdev,
 					bo,
 					req->size,
-					ttm_bo_type_user,
+					ttm_bo_type_device,
 					&placement,
 					req->page_alignment,
 					req->user_address,

@@ -27,8 +27,8 @@
 #ifndef _SYSCOMMON_H
 #define _SYSCOMMON_H
 
+#include "cdv_sysinfo.h"
 #include "sysconfig.h"      
-#include "sysinfo.h"		
 #include "servicesint.h"
 #include "queue.h"
 #include "power.h"
