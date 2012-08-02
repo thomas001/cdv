@@ -160,8 +160,8 @@ static int ttm_bo_create_private(struct ttm_bo_device *bdev,
 	}
 
 	ret = ttm_bo_init(bdev, bo, size, type, placement, page_alignment,
-				buffer_start, interruptible,
-				persistant_swap_storage, acc_size, NULL);
+			  buffer_start, interruptible,
+			  persistant_swap_storage, acc_size, NULL, NULL);
 	if (likely(ret == 0))
 		*p_bo = bo;
 
@@ -264,9 +264,9 @@ int ttm_pl_create_ioctl(struct ttm_object_file *tfile,
 		flags |=  TTM_PL_FLAG_WC | TTM_PL_FLAG_UNCACHED;
 
 	ret = ttm_bo_init(bdev, bo, req->size,
-				     ttm_bo_type_device, &placement,
-				     req->page_alignment, 0, true,
-				     NULL, acc_size, &ttm_bo_user_destroy);
+			  ttm_bo_type_device, &placement,
+			  req->page_alignment, 0, true,
+			  NULL, acc_size, NULL, &ttm_bo_user_destroy);
 	ttm_read_unlock(lock);
 
 	/*
@@ -330,16 +330,17 @@ int ttm_pl_ub_create_ioctl(struct ttm_object_file *tfile,
 	placement.placement = &flags;
 
 	ret = ttm_bo_init(bdev,
-					bo,
-					req->size,
-					ttm_bo_type_device,
-					&placement,
-					req->page_alignment,
-					req->user_address,
-					true,
-					NULL,
-					acc_size,
-					&ttm_bo_user_destroy);
+			  bo,
+			  req->size,
+			  ttm_bo_type_device,
+			  &placement,
+			  req->page_alignment,
+			  req->user_address,
+			  true,
+			  NULL,
+			  acc_size,
+			  NULL,
+			  &ttm_bo_user_destroy);
 
 	/*
 	 * Note that the ttm_buffer_object_init function

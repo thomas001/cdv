@@ -227,8 +227,25 @@ static int drm_psb_tbe_populate(struct ttm_tt *ttm)
 	unsigned i;
 	int r;
 
+	bool slave = !!(ttm->page_flags & TTM_PAGE_FLAG_SG);
+
 	if (ttm->state != tt_unpopulated)
+	  return 0;
+
+	if (slave && ttm->sg) {
+		drm_prime_sg_to_page_addr_arrays(ttm->sg, ttm->pages,
+						 psb_ttm->ttm.dma_address,
+						 ttm->num_pages);
+		ttm->state = tt_unbound;
 		return 0;
+	}
+
+#ifdef CONFIG_SWIOTLB
+	if (swiotlb_nr_tbl()) {
+		return ttm_dma_populate(&psb_ttm->ttm, &dev_priv->dev->pdev->dev);
+	}
+#endif
+	
 
 	r = ttm_pool_populate(ttm);
 	if (r) {
@@ -339,10 +356,15 @@ static void drm_psb_tbe_unpopulate(struct ttm_tt *ttm)
 	    container_of(bdev, struct drm_psb_private, bdev);
 	struct drm_psb_ttm_tt *psb_ttm = (void*) ttm;
 	unsigned i;
+	bool slave = !!(ttm->page_flags & TTM_PAGE_FLAG_SG);
+
+	if (slave)
+		return;
+
 
 #ifdef CONFIG_SWIOTLB
 	if (swiotlb_nr_tbl()) {
-		ttm_dma_unpopulate(&psb_ttm->ttm, dev_priv->dev->pdev);
+		ttm_dma_unpopulate(&psb_ttm->ttm, &dev_priv->dev->pdev->dev);
 		return;
 	}
 #endif
