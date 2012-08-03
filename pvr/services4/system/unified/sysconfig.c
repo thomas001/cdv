@@ -72,18 +72,35 @@ IMG_CPU_VIRTADDR gsPoulsboDisplayRegsCPUVaddr;
 
 extern struct pci_dev *gpsPVRLDMDev;
 
+bool need_sample_cache_workaround;
+
 #define	POULSBO_ADDR_RANGE_INDEX	(MMADR_INDEX - 4)
 #define	POULSBO_HP_ADDR_RANGE_INDEX	(GMADR_INDEX - 4)
 static PVRSRV_ERROR PCIInitDev(SYS_DATA *psSysData)
 {
 	SYS_SPECIFIC_DATA *psSysSpecData = (SYS_SPECIFIC_DATA *) psSysData->pvSysSpecificData;
 	IMG_UINT32 ui32MaxOffset = POULSBO_MAX_OFFSET;
+	struct pci_dev *mch_dev;
 
 	if (!IS_CDV(gpDrmDevice))
 	{
 		PVR_DPF((PVR_DBG_ERROR,"PCIInitDev: Device not supported"));
 		return PVRSRV_ERROR_NOT_SUPPORTED;
 	}
+
+	mch_dev = pci_get_bus_and_slot(0, PCI_DEVFN(0,0));
+	if (!mch_dev)
+	{
+		PVR_DPF((PVR_DBG_ERROR,"PCIInitDev: Failed to get (0,0,0) device"));
+		return PVRSRV_ERROR_NOT_SUPPORTED;
+	}
+	if (mch_dev->revision < 4) {
+		need_sample_cache_workaround = true;
+		printk(KERN_INFO "Cedartrail: apply sample cache workaround\n");
+	} else
+		need_sample_cache_workaround = false;
+
+	pci_dev_put(mch_dev);
 
 	psSysSpecData->hSGXPCI = OSPCISetDev((IMG_VOID *)psSysSpecData->psPCIDev, 0);
 	ui32MaxOffset = PSB_POULSBO_MAX_OFFSET;

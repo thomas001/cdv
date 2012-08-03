@@ -128,4 +128,6 @@ typedef struct
 	}u;
 } PCICONFIG_SPACE, *PPCICONFIG_SPACE;
 
+extern bool need_sample_cache_workaround;
+
 #endif	
