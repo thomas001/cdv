@@ -1561,6 +1561,7 @@ PVRSRV_ERROR SGXRegisterDevice (PVRSRV_DEVICE_NODE *psDeviceNode)
 {
 	DEVICE_MEMORY_INFO *psDevMemoryInfo;
 	DEVICE_MEMORY_HEAP_INFO *psDeviceMemoryHeap;
+	int heap_count;
 
 	
 	psDeviceNode->sDevId.eDeviceType		= DEV_DEVICE_TYPE;
@@ -1639,16 +1640,19 @@ PVRSRV_ERROR SGXRegisterDevice (PVRSRV_DEVICE_NODE *psDeviceNode)
 	
 	psDevMemoryInfo->ui32Flags = 0;
 
+	heap_count = SGX_MAX_HEAP_ID;
+	if (!need_sample_cache_workaround)
+		--heap_count;
 	
 	if(OSAllocMem( PVRSRV_OS_PAGEABLE_HEAP,
-					 sizeof(DEVICE_MEMORY_HEAP_INFO) * SGX_MAX_HEAP_ID,
+					 sizeof(DEVICE_MEMORY_HEAP_INFO) * heap_count,
 					 (IMG_VOID **)&psDevMemoryInfo->psDeviceMemoryHeap, 0,
 					 "Array of Device Memory Heap Info") != PVRSRV_OK)
 	{
 		PVR_DPF((PVR_DBG_ERROR,"SGXRegisterDevice : Failed to alloc memory for DEVICE_MEMORY_HEAP_INFO"));
 		return (PVRSRV_ERROR_OUT_OF_MEMORY);
 	}
-	OSMemSet(psDevMemoryInfo->psDeviceMemoryHeap, 0, sizeof(DEVICE_MEMORY_HEAP_INFO) * SGX_MAX_HEAP_ID);
+	OSMemSet(psDevMemoryInfo->psDeviceMemoryHeap, 0, sizeof(DEVICE_MEMORY_HEAP_INFO) * heap_count);
 
 	psDeviceMemoryHeap = psDevMemoryInfo->psDeviceMemoryHeap;
 
@@ -1657,8 +1661,13 @@ PVRSRV_ERROR SGXRegisterDevice (PVRSRV_DEVICE_NODE *psDeviceNode)
 
 	
 	psDeviceMemoryHeap->ui32HeapID = HEAP_ID( PVRSRV_DEVICE_TYPE_SGX, SGX_GENERAL_HEAP_ID);
-	psDeviceMemoryHeap->sDevVAddrBase.uiAddr = SGX_GENERAL_HEAP_BASE;
-	psDeviceMemoryHeap->ui32HeapSize = SGX_GENERAL_HEAP_SIZE;
+	if (need_sample_cache_workaround) {
+		psDeviceMemoryHeap->sDevVAddrBase.uiAddr = SGX_GENERAL_HEAP_BASE_REV1;
+		psDeviceMemoryHeap->ui32HeapSize = SGX_GENERAL_HEAP_SIZE_REV1;
+	} else {
+		psDeviceMemoryHeap->sDevVAddrBase.uiAddr = SGX_GENERAL_HEAP_BASE;
+		psDeviceMemoryHeap->ui32HeapSize = SGX_GENERAL_HEAP_SIZE;
+	}
 	psDeviceMemoryHeap->ui32Attribs = PVRSRV_HAP_WRITECOMBINE
 														| PVRSRV_MEM_RAM_BACKED_ALLOCATION
 														| PVRSRV_HAP_SINGLE_PROCESS;
@@ -1675,23 +1684,30 @@ PVRSRV_ERROR SGXRegisterDevice (PVRSRV_DEVICE_NODE *psDeviceNode)
 
 #if defined(FIX_HW_BRN_SAMPLE_CACHE)
 	/* New texture heap on high address */
-	psDeviceMemoryHeap->ui32HeapID = HEAP_ID( PVRSRV_DEVICE_TYPE_SGX, SGX_TEXTURE_HEAP_ID);
-	psDeviceMemoryHeap->sDevVAddrBase.uiAddr = SGX_TEXTURE_HEAP_BASE;
-	psDeviceMemoryHeap->ui32HeapSize = SGX_TEXTURE_HEAP_SIZE;
-	psDeviceMemoryHeap->ui32Attribs = PVRSRV_HAP_WRITECOMBINE
-														| PVRSRV_MEM_RAM_BACKED_ALLOCATION
-														| PVRSRV_HAP_SINGLE_PROCESS;
-	psDeviceMemoryHeap->pszName = "Texture";
-	psDeviceMemoryHeap->pszBSName = "Texture BS";
-	psDeviceMemoryHeap->DevMemHeapType = DEVICE_MEMORY_HEAP_PERCONTEXT;
-	
-	psDeviceMemoryHeap->ui32DataPageSize = SGX_MMU_PAGE_SIZE;
-	psDeviceMemoryHeap++;
+	if (need_sample_cache_workaround) {
+		psDeviceMemoryHeap->ui32HeapID = HEAP_ID( PVRSRV_DEVICE_TYPE_SGX, SGX_TEXTURE_HEAP_ID);
+		psDeviceMemoryHeap->sDevVAddrBase.uiAddr = SGX_TEXTURE_HEAP_BASE_REV1;
+		psDeviceMemoryHeap->ui32HeapSize = SGX_TEXTURE_HEAP_SIZE_REV1;
+		psDeviceMemoryHeap->ui32Attribs = PVRSRV_HAP_WRITECOMBINE
+			| PVRSRV_MEM_RAM_BACKED_ALLOCATION
+			| PVRSRV_HAP_SINGLE_PROCESS;
+		psDeviceMemoryHeap->pszName = "Texture";
+		psDeviceMemoryHeap->pszBSName = "Texture BS";
+		psDeviceMemoryHeap->DevMemHeapType = DEVICE_MEMORY_HEAP_PERCONTEXT;
+
+		psDeviceMemoryHeap->ui32DataPageSize = SGX_MMU_PAGE_SIZE;
+		psDeviceMemoryHeap++;
+	}
 #endif
 	
 	psDeviceMemoryHeap->ui32HeapID = HEAP_ID( PVRSRV_DEVICE_TYPE_SGX, SGX_TADATA_HEAP_ID);
-	psDeviceMemoryHeap->sDevVAddrBase.uiAddr = SGX_TADATA_HEAP_BASE;
-	psDeviceMemoryHeap->ui32HeapSize = SGX_TADATA_HEAP_SIZE;
+	if (need_sample_cache_workaround) {
+		psDeviceMemoryHeap->sDevVAddrBase.uiAddr = SGX_TADATA_HEAP_BASE_REV1;
+		psDeviceMemoryHeap->ui32HeapSize = SGX_TADATA_HEAP_SIZE_REV1;
+	} else {
+		psDeviceMemoryHeap->sDevVAddrBase.uiAddr = SGX_TADATA_HEAP_BASE;
+		psDeviceMemoryHeap->ui32HeapSize = SGX_TADATA_HEAP_SIZE;
+	}
 	psDeviceMemoryHeap->ui32Attribs = PVRSRV_HAP_WRITECOMBINE
 														| PVRSRV_MEM_RAM_BACKED_ALLOCATION
 														| PVRSRV_HAP_MULTI_PROCESS;
@@ -1705,8 +1721,13 @@ PVRSRV_ERROR SGXRegisterDevice (PVRSRV_DEVICE_NODE *psDeviceNode)
 
 	
 	psDeviceMemoryHeap->ui32HeapID = HEAP_ID( PVRSRV_DEVICE_TYPE_SGX, SGX_KERNEL_CODE_HEAP_ID);
-	psDeviceMemoryHeap->sDevVAddrBase.uiAddr = SGX_KERNEL_CODE_HEAP_BASE;
-	psDeviceMemoryHeap->ui32HeapSize = SGX_KERNEL_CODE_HEAP_SIZE;
+	if (need_sample_cache_workaround) {
+		psDeviceMemoryHeap->sDevVAddrBase.uiAddr = SGX_KERNEL_CODE_HEAP_BASE_REV1;
+		psDeviceMemoryHeap->ui32HeapSize = SGX_KERNEL_CODE_HEAP_SIZE_REV1;
+	} else {
+		psDeviceMemoryHeap->sDevVAddrBase.uiAddr = SGX_KERNEL_CODE_HEAP_BASE;
+		psDeviceMemoryHeap->ui32HeapSize = SGX_KERNEL_CODE_HEAP_SIZE;
+	}
 	psDeviceMemoryHeap->ui32Attribs = PVRSRV_HAP_WRITECOMBINE
 															| PVRSRV_MEM_RAM_BACKED_ALLOCATION
 															| PVRSRV_HAP_MULTI_PROCESS;
@@ -1720,8 +1741,13 @@ PVRSRV_ERROR SGXRegisterDevice (PVRSRV_DEVICE_NODE *psDeviceNode)
 
 	
 	psDeviceMemoryHeap->ui32HeapID = HEAP_ID( PVRSRV_DEVICE_TYPE_SGX, SGX_KERNEL_DATA_HEAP_ID);
-	psDeviceMemoryHeap->sDevVAddrBase.uiAddr = SGX_KERNEL_DATA_HEAP_BASE;
-	psDeviceMemoryHeap->ui32HeapSize = SGX_KERNEL_DATA_HEAP_SIZE;
+	if (need_sample_cache_workaround) {
+		psDeviceMemoryHeap->sDevVAddrBase.uiAddr = SGX_KERNEL_DATA_HEAP_BASE_REV1;
+		psDeviceMemoryHeap->ui32HeapSize = SGX_KERNEL_DATA_HEAP_SIZE_REV1;
+	} else {
+		psDeviceMemoryHeap->sDevVAddrBase.uiAddr = SGX_KERNEL_DATA_HEAP_BASE;
+		psDeviceMemoryHeap->ui32HeapSize = SGX_KERNEL_DATA_HEAP_SIZE;
+	}
 	psDeviceMemoryHeap->ui32Attribs = PVRSRV_HAP_WRITECOMBINE
 																| PVRSRV_MEM_RAM_BACKED_ALLOCATION
 																| PVRSRV_HAP_MULTI_PROCESS;
@@ -1735,13 +1761,10 @@ PVRSRV_ERROR SGXRegisterDevice (PVRSRV_DEVICE_NODE *psDeviceNode)
 
 	
 	psDeviceMemoryHeap->ui32HeapID = HEAP_ID( PVRSRV_DEVICE_TYPE_SGX, SGX_PIXELSHADER_HEAP_ID);
-	psDeviceMemoryHeap->sDevVAddrBase.uiAddr = SGX_PIXELSHADER_HEAP_BASE;
-	
-
-
-
-
-
+	if (need_sample_cache_workaround)
+		psDeviceMemoryHeap->sDevVAddrBase.uiAddr = SGX_PIXELSHADER_HEAP_BASE_REV1;
+	else
+		psDeviceMemoryHeap->sDevVAddrBase.uiAddr = SGX_PIXELSHADER_HEAP_BASE;
 	psDeviceMemoryHeap->ui32HeapSize = ((10 << SGX_USE_CODE_SEGMENT_RANGE_BITS) - 0x00001000);
 	PVR_ASSERT(psDeviceMemoryHeap->ui32HeapSize <= SGX_PIXELSHADER_HEAP_SIZE);
 	psDeviceMemoryHeap->ui32Attribs = PVRSRV_HAP_WRITECOMBINE
@@ -1757,7 +1780,10 @@ PVRSRV_ERROR SGXRegisterDevice (PVRSRV_DEVICE_NODE *psDeviceNode)
 
 	
 	psDeviceMemoryHeap->ui32HeapID = HEAP_ID( PVRSRV_DEVICE_TYPE_SGX, SGX_VERTEXSHADER_HEAP_ID);
-	psDeviceMemoryHeap->sDevVAddrBase.uiAddr = SGX_VERTEXSHADER_HEAP_BASE;
+	if (need_sample_cache_workaround)
+		psDeviceMemoryHeap->sDevVAddrBase.uiAddr = SGX_VERTEXSHADER_HEAP_BASE_REV1;
+	else
+		psDeviceMemoryHeap->sDevVAddrBase.uiAddr = SGX_VERTEXSHADER_HEAP_BASE;
 	
 	psDeviceMemoryHeap->ui32HeapSize = ((4 << SGX_USE_CODE_SEGMENT_RANGE_BITS) - 0x00001000);
 	PVR_ASSERT(psDeviceMemoryHeap->ui32HeapSize <= SGX_VERTEXSHADER_HEAP_SIZE);
@@ -1774,8 +1800,13 @@ PVRSRV_ERROR SGXRegisterDevice (PVRSRV_DEVICE_NODE *psDeviceNode)
 
 	
 	psDeviceMemoryHeap->ui32HeapID = HEAP_ID( PVRSRV_DEVICE_TYPE_SGX, SGX_PDSPIXEL_CODEDATA_HEAP_ID);
-	psDeviceMemoryHeap->sDevVAddrBase.uiAddr = SGX_PDSPIXEL_CODEDATA_HEAP_BASE;
-	psDeviceMemoryHeap->ui32HeapSize = SGX_PDSPIXEL_CODEDATA_HEAP_SIZE;
+	if (need_sample_cache_workaround) {
+		psDeviceMemoryHeap->sDevVAddrBase.uiAddr = SGX_PDSPIXEL_CODEDATA_HEAP_BASE_REV1;
+		psDeviceMemoryHeap->ui32HeapSize = SGX_PDSPIXEL_CODEDATA_HEAP_SIZE_REV1;
+	} else {
+		psDeviceMemoryHeap->sDevVAddrBase.uiAddr = SGX_PDSPIXEL_CODEDATA_HEAP_BASE;
+		psDeviceMemoryHeap->ui32HeapSize = SGX_PDSPIXEL_CODEDATA_HEAP_SIZE;
+	}
 	psDeviceMemoryHeap->ui32Attribs = PVRSRV_HAP_WRITECOMBINE
 																| PVRSRV_MEM_RAM_BACKED_ALLOCATION
 																| PVRSRV_HAP_SINGLE_PROCESS;
@@ -1789,8 +1820,13 @@ PVRSRV_ERROR SGXRegisterDevice (PVRSRV_DEVICE_NODE *psDeviceNode)
 
 	
 	psDeviceMemoryHeap->ui32HeapID = HEAP_ID( PVRSRV_DEVICE_TYPE_SGX, SGX_PDSVERTEX_CODEDATA_HEAP_ID);
-	psDeviceMemoryHeap->sDevVAddrBase.uiAddr = SGX_PDSVERTEX_CODEDATA_HEAP_BASE;
-	psDeviceMemoryHeap->ui32HeapSize = SGX_PDSVERTEX_CODEDATA_HEAP_SIZE;
+	if (need_sample_cache_workaround) {
+		psDeviceMemoryHeap->sDevVAddrBase.uiAddr = SGX_PDSVERTEX_CODEDATA_HEAP_BASE_REV1;
+		psDeviceMemoryHeap->ui32HeapSize = SGX_PDSVERTEX_CODEDATA_HEAP_SIZE_REV1;
+	} else {
+		psDeviceMemoryHeap->sDevVAddrBase.uiAddr = SGX_PDSVERTEX_CODEDATA_HEAP_BASE;
+		psDeviceMemoryHeap->ui32HeapSize = SGX_PDSVERTEX_CODEDATA_HEAP_SIZE;
+	}
 	psDeviceMemoryHeap->ui32Attribs = PVRSRV_HAP_WRITECOMBINE
 																| PVRSRV_MEM_RAM_BACKED_ALLOCATION
 																| PVRSRV_HAP_SINGLE_PROCESS;
@@ -1804,8 +1840,13 @@ PVRSRV_ERROR SGXRegisterDevice (PVRSRV_DEVICE_NODE *psDeviceNode)
 
 	
 	psDeviceMemoryHeap->ui32HeapID = HEAP_ID( PVRSRV_DEVICE_TYPE_SGX, SGX_SYNCINFO_HEAP_ID);
-	psDeviceMemoryHeap->sDevVAddrBase.uiAddr = SGX_SYNCINFO_HEAP_BASE;
-	psDeviceMemoryHeap->ui32HeapSize = SGX_SYNCINFO_HEAP_SIZE;
+	if (need_sample_cache_workaround) {
+		psDeviceMemoryHeap->sDevVAddrBase.uiAddr = SGX_SYNCINFO_HEAP_BASE_REV1;
+		psDeviceMemoryHeap->ui32HeapSize = SGX_SYNCINFO_HEAP_SIZE_REV1;
+	} else {
+		psDeviceMemoryHeap->sDevVAddrBase.uiAddr = SGX_SYNCINFO_HEAP_BASE;
+		psDeviceMemoryHeap->ui32HeapSize = SGX_SYNCINFO_HEAP_SIZE;
+	}
 	psDeviceMemoryHeap->ui32Attribs = PVRSRV_HAP_WRITECOMBINE
 														| PVRSRV_MEM_RAM_BACKED_ALLOCATION
 														| PVRSRV_HAP_MULTI_PROCESS;
@@ -1821,7 +1862,10 @@ PVRSRV_ERROR SGXRegisterDevice (PVRSRV_DEVICE_NODE *psDeviceNode)
 
 	
 	psDeviceMemoryHeap->ui32HeapID = HEAP_ID( PVRSRV_DEVICE_TYPE_SGX, SGX_SHARED_3DPARAMETERS_HEAP_ID);
-	psDeviceMemoryHeap->sDevVAddrBase.uiAddr = SGX_SHARED_3DPARAMETERS_HEAP_BASE;
+	if (need_sample_cache_workaround)
+		psDeviceMemoryHeap->sDevVAddrBase.uiAddr = SGX_SHARED_3DPARAMETERS_HEAP_BASE_REV1;
+	else
+		psDeviceMemoryHeap->sDevVAddrBase.uiAddr = SGX_SHARED_3DPARAMETERS_HEAP_BASE;
 	psDeviceMemoryHeap->ui32HeapSize = SGX_SHARED_3DPARAMETERS_HEAP_SIZE;
 	psDeviceMemoryHeap->pszName = "Shared 3DParameters";
 	psDeviceMemoryHeap->pszBSName = "Shared 3DParameters BS";
@@ -1836,7 +1880,10 @@ PVRSRV_ERROR SGXRegisterDevice (PVRSRV_DEVICE_NODE *psDeviceNode)
 
 	
 	psDeviceMemoryHeap->ui32HeapID = HEAP_ID( PVRSRV_DEVICE_TYPE_SGX, SGX_PERCONTEXT_3DPARAMETERS_HEAP_ID);
-	psDeviceMemoryHeap->sDevVAddrBase.uiAddr = SGX_PERCONTEXT_3DPARAMETERS_HEAP_BASE;
+	if (need_sample_cache_workaround)
+		psDeviceMemoryHeap->sDevVAddrBase.uiAddr = SGX_PERCONTEXT_3DPARAMETERS_HEAP_BASE_REV1;
+	else
+		psDeviceMemoryHeap->sDevVAddrBase.uiAddr = SGX_PERCONTEXT_3DPARAMETERS_HEAP_BASE;
 	psDeviceMemoryHeap->ui32HeapSize = SGX_PERCONTEXT_3DPARAMETERS_HEAP_SIZE;
 	psDeviceMemoryHeap->pszName = "Percontext 3DParameters";
 	psDeviceMemoryHeap->pszBSName = "Percontext 3DParameters BS";

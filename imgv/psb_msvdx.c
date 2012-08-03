@@ -82,7 +82,7 @@ static int psb_msvdx_map_command(struct drm_device *dev,
 	int ret = 0;
 	unsigned long cmd_page_offset = cmd_offset & ~PAGE_MASK;
 	unsigned long cmd_size_remaining;
-	struct ttm_bo_kmap_obj cmd_kmap, regio_kmap;
+	struct ttm_bo_kmap_obj cmd_kmap;
 	void *cmd, *cmd_copy, *cmd_start;
 	bool is_iomem;
 	int i;
@@ -110,8 +110,6 @@ static int psb_msvdx_map_command(struct drm_device *dev,
 		uint32_t cur_cmd_size = MEMIO_READ_FIELD(cmd, FWRK_GENMSG_SIZE);
 		uint32_t cur_cmd_id = MEMIO_READ_FIELD(cmd, FWRK_GENMSG_ID);
 		uint32_t mmu_ptd = 0, msvdx_mmu_invalid = 0;
-		struct psb_msvdx_deblock_queue *msvdx_deblock;
-		unsigned long irq_flags;
 
 		PSB_DEBUG_GENERAL("cmd start at %08x cur_cmd_size = %d"
 				  " cur_cmd_id = %02x fence = %08x\n",
@@ -206,72 +204,6 @@ static int psb_msvdx_map_command(struct drm_device *dev,
 		}
 			break;
 
-		case VA_MSGID_DEBLOCK:
-			msvdx_priv->deblock_enabled = 1;
-			/* Fence ID */
-			MEMIO_WRITE_FIELD(cmd, FW_DXVA_DEBLOCK_FENCE_VALUE,
-					  sequence);
-			mmu_ptd = psb_get_default_pd_addr(dev_priv->mmu);
-			msvdx_mmu_invalid = atomic_cmpxchg(&dev_priv->msvdx_mmu_invaldc,
-					     1, 0);
-			if (msvdx_mmu_invalid == 1) {
-				mmu_ptd |= 1;
-				PSB_DEBUG_GENERAL("MSVDX:Set MMU invalidate\n");
-			}
-
-			/* PTD */
-			MEMIO_WRITE_FIELD(cmd,
-					  FW_DXVA_DEBLOCK_MMUPTD,
-					  mmu_ptd);
-
-			/* printk("Got deblock msg\n"); */
-			/* Deblock message is followed by 32 */
-			/* bytes of deblock params */
-			msvdx_deblock = kmalloc(
-				sizeof(struct psb_msvdx_deblock_queue),
-				GFP_KERNEL);
-
-			if (msvdx_deblock == NULL) {
-				DRM_ERROR("DEBLOCK QUE: Out of memory...\n");
-				ret =  -ENOMEM;
-				goto out;
-			}
-
-			memcpy(&msvdx_deblock->dbParams, cmd + 16, sizeof(struct DEBLOCKPARAMS));
-
-			ret = ttm_bo_kmap(
-				(struct ttm_buffer_object *)
-				msvdx_deblock->dbParams.handle,
-				0,
-				(msvdx_deblock->dbParams.buffer_size +
-				 PAGE_SIZE - 1) >> PAGE_SHIFT,
-				&regio_kmap);
-
-			/* printk("deblock regio buffer size is 0x%x\n",
-			   msvdx_deblock->dbParams.buffer_size); */
-
-			if (likely(!ret)) {
-				msvdx_deblock->dbParams.pPicparams = kmalloc(
-					msvdx_deblock->dbParams.buffer_size,
-					GFP_KERNEL);
-
-				if (msvdx_deblock->dbParams.pPicparams != NULL)
-					memcpy(
-						msvdx_deblock->dbParams.pPicparams,
-						regio_kmap.virtual,
-						msvdx_deblock->dbParams.buffer_size);
-				ttm_bo_kunmap(&regio_kmap);
-			}
-			spin_lock_irqsave(&msvdx_priv->msvdx_lock, irq_flags);
-			list_add_tail(&msvdx_deblock->head,
-				      &msvdx_priv->deblock_queue);
-			spin_unlock_irqrestore(&msvdx_priv->msvdx_lock,
-					       irq_flags);
-
-			cmd += sizeof(struct DEBLOCKPARAMS);
-			cmd_size_remaining -= sizeof(struct DEBLOCKPARAMS);
-			break;
-            
 		case VA_MSGID_HOST_BE_OPP:
 
 			PSB_DEBUG_MSVDX("MSVDX_DEBUG: send host_be_opp message. \n");
@@ -703,88 +635,6 @@ out:
 	return ret;
 }
 
-static int psb_msvdx_towpass_deblock(struct drm_device *dev,
-				     uint32_t *pPicparams)
-{
-	struct drm_psb_private *dev_priv =
-		(struct drm_psb_private *)dev->dev_private;
-	uint32_t cmd_size, cmd_count = 0;
-	uint32_t cmd_id, reg, value, wait, reg_value, read = 0, ret = 0;
-
-	cmd_size = *pPicparams++;
-	PSB_DEBUG_GENERAL("MSVDX DEBLOCK: deblock get cmd size %d\n", cmd_size);
-	/* printk("MSVDX DEBLOCK: deblock get cmd size %d\n", cmd_size); */
-
-	do {
-		cmd_id = (*pPicparams) & 0xf0000000;
-		reg = (*pPicparams++)  & 0x0fffffff;
-		switch (cmd_id) {
-		case MSVDX_DEBLOCK_REG_SET: {
-			value = *pPicparams++;
-			PSB_WMSVDX32(value, reg);
-			cmd_count += 2;
-			break;
-		}
-		case MSVDX_DEBLOCK_REG_GET: {
-			read = PSB_RMSVDX32(reg);
-			cmd_count += 1;
-			break;
-		}
-		case MSVDX_DEBLOCK_REG_POLLn: {
-			value = *pPicparams++;
-			wait = 0;
-
-			do {
-				reg_value = PSB_RMSVDX32(reg);
-			} while ((wait++ < 20000) && (value > reg_value));
-
-			if (wait >= 20000) {
-				ret = 1;
-				PSB_DEBUG_GENERAL(
-					"MSVDX DEBLOCK: polln cmd space time out!\n");
-				goto finish_deblock;
-			}
-			cmd_count += 2;
-			break;
-		}
-		case MSVDX_DEBLOCK_REG_POLLx: {
-			wait = 0;
-
-			do {
-				reg_value = PSB_RMSVDX32(reg);
-			} while ((wait++ < 20000) && (read > reg_value));
-
-			if (wait >= 20000) {
-				ret = 1;
-				PSB_DEBUG_GENERAL(
-					"MSVDX DEBLOCK: pollx cmd space time out!\n");
-				goto finish_deblock;
-			}
-
-			cmd_count += 1;
-			break;
-		}
-		default:
-			ret = 1;
-			PSB_DEBUG_GENERAL(
-				"MSVDX DEBLOCK: get error cmd_id: 0x%x!\n",
-				cmd_id);
-			PSB_DEBUG_GENERAL(
-				"MSVDX DEBLOCK: execute cmd num is %d\n",
-				cmd_count);
-			/* printk("MSVDX DEBLOCK: get error cmd_id: 0x%x!\n",
-			   cmd_id); */
-			/* printk("MSVDX DEBLOCK: execute cmd num is %d\n",
-			   cmd_count); */
-			goto finish_deblock;
-		}
-	} while (cmd_count < cmd_size);
-
-
-finish_deblock:
-	PSB_DEBUG_GENERAL("MSVDX DEBLOCK: execute cmd num is %d\n", cmd_count);
-	return ret;
-}
 
 /*
  * MSVDX MTX interrupt
@@ -994,7 +844,6 @@ loop: /* just for coding style check */
 	case VA_MSGID_DEBLOCK_REQUIRED:	{
 		uint32_t ctxid = MEMIO_READ_FIELD(buf,
 						  FW_VA_DEBLOCK_REQUIRED_CONTEXT);
-		struct psb_msvdx_deblock_queue *msvdx_deblock;
 		uint32_t fence = MEMIO_READ_FIELD(buf,
 						  FW_VA_DEBLOCK_REQUIRED_FENCE_VALUE);
 
@@ -1008,62 +857,12 @@ loop: /* just for coding style check */
 			DRM_ERROR("MSVDX: should not support both deblock and host_be_opp message. \n");
 			goto done;
 		} else if (msvdx_priv->deblock_enabled == 1) {
-			PSB_DEBUG_MSVDX("MSVDX_DEBUG: get deblock required message for deblock operation.\n");
-			if (list_empty(&msvdx_priv->deblock_queue)) {
-				PSB_DEBUG_GENERAL(
-					"DEBLOCKQUE: deblock param list is empty\n");
+			PSB_DEBUG_GENERAL(
+				"Host deblocking is not used on CDV any more. Abort\n");
 				PSB_WMSVDX32(0, MSVDX_CMDS_END_SLICE_PICTURE);
 				PSB_WMSVDX32(1, MSVDX_CMDS_END_SLICE_PICTURE);
 				goto done;
-			}
-			msvdx_deblock = list_first_entry(&msvdx_priv->deblock_queue,
-							 struct psb_msvdx_deblock_queue, head);
 
-			if (0) {
-				PSB_DEBUG_GENERAL("MSVDX DEBLOCK: by pass \n");
-				/* try to unblock rendec */
-				PSB_WMSVDX32(0, MSVDX_CMDS_END_SLICE_PICTURE);
-				PSB_WMSVDX32(1, MSVDX_CMDS_END_SLICE_PICTURE);
-				kfree(msvdx_deblock->dbParams.pPicparams);
-				list_del(&msvdx_deblock->head);
-				goto done;
-			}
-
-
-			if (ctxid != msvdx_deblock->dbParams.ctxid) {
-				PSB_DEBUG_GENERAL("MSVDX DEBLOCK: wrong ctxid, may "
-						  "caused by multiple context since "
-						  "it's not supported yet\n");
-				/* try to unblock rendec */
-				PSB_WMSVDX32(0, MSVDX_CMDS_END_SLICE_PICTURE);
-				PSB_WMSVDX32(1, MSVDX_CMDS_END_SLICE_PICTURE);
-				kfree(msvdx_deblock->dbParams.pPicparams);
-				list_del(&msvdx_deblock->head);
-				goto done;
-			}
-
-			if (msvdx_deblock->dbParams.pPicparams) {
-				PSB_DEBUG_GENERAL("MSVDX DEBLOCK: start deblocking\n");
-				/* printk("MSVDX DEBLOCK: start deblocking\n"); */
-
-				if (psb_msvdx_towpass_deblock(dev,
-							      msvdx_deblock->dbParams.pPicparams)) {
-
-					PSB_DEBUG_GENERAL(
-						"MSVDX DEBLOCK: deblock fail!\n");
-					PSB_WMSVDX32(0, MSVDX_CMDS_END_SLICE_PICTURE);
-					PSB_WMSVDX32(1, MSVDX_CMDS_END_SLICE_PICTURE);
-				}
-				kfree(msvdx_deblock->dbParams.pPicparams);
-			} else {
-				PSB_DEBUG_GENERAL("MSVDX DEBLOCK: deblock abort!\n");
-				/* printk("MSVDX DEBLOCK: deblock abort!\n"); */
-				PSB_WMSVDX32(0, MSVDX_CMDS_END_SLICE_PICTURE);
-				PSB_WMSVDX32(1, MSVDX_CMDS_END_SLICE_PICTURE);
-			}
-
-			list_del(&msvdx_deblock->head);
-			kfree(msvdx_deblock);
 		} else if (msvdx_priv->host_be_opp_enabled == 1) {
 			PSB_DEBUG_MSVDX("MSVDX_DEBUG: get deblock required message for error concealment.\n");
             
