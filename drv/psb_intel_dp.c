@@ -666,7 +666,7 @@ psb_intel_dp_i2c_init(struct psb_intel_output *output, const char *name)
 }
 
 static bool
-psb_intel_dp_mode_fixup(struct drm_encoder *encoder, struct drm_display_mode *mode,
+psb_intel_dp_mode_fixup(struct drm_encoder *encoder, const struct drm_display_mode *mode,
 		    struct drm_display_mode *adjusted_mode)
 {
 	struct psb_intel_output *output = enc_to_psb_intel_output(encoder);
@@ -677,10 +677,11 @@ psb_intel_dp_mode_fixup(struct drm_encoder *encoder, struct drm_display_mode *mo
 	static int bws[2] = { DP_LINK_BW_1_62, DP_LINK_BW_2_7 };
 	int bpp = 24;
 	struct drm_psb_private *dev_priv = encoder->dev->dev_private;
+	int adjusted_clock = mode->clock;
 
 	if (is_edp(output) && intel_dp->panel_fixed_mode) {
 		psb_intel_fixed_panel_mode(intel_dp->panel_fixed_mode, adjusted_mode);
-		mode->clock = intel_dp->panel_fixed_mode->clock;
+		adjusted_clock = intel_dp->panel_fixed_mode->clock;
 		bpp = dev_priv->edp.bpp;
 	}
 
@@ -688,7 +689,7 @@ psb_intel_dp_mode_fixup(struct drm_encoder *encoder, struct drm_display_mode *mo
 		for (clock = max_clock; clock >= 0; clock--) {
 			int link_avail = psb_intel_dp_max_data_rate(psb_intel_dp_link_clock(bws[clock]), lane_count);
 
-			if (psb_intel_dp_link_required(mode->clock, bpp)
+			if (psb_intel_dp_link_required(adjusted_clock, bpp)
 					<= link_avail) {
 				intel_dp->link_bw = bws[clock];
 				intel_dp->lane_count = lane_count;
@@ -1530,7 +1531,6 @@ psb_intel_dp_detect(struct drm_connector *connector, bool force)
 		edid = drm_get_edid(connector, &intel_dp->adapter);
 		if (edid) {
 			intel_dp->has_audio = drm_detect_monitor_audio(edid);
-			connector->display_info.raw_edid = NULL;
 			kfree(edid);
 		}
 	}
@@ -1614,7 +1614,6 @@ psb_intel_dp_detect_audio(struct drm_connector *connector)
 	if (edid) {
 		has_audio = drm_detect_monitor_audio(edid);
 
-		connector->display_info.raw_edid = NULL;
 		kfree(edid);
 	}
 

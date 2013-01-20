@@ -19,7 +19,8 @@ include_dirs := \
         -I$(INCDIR)/bc_video \
         -I$(INCDIR)/imgv \
 	-Iinclude/linux \
-	-Iinclude/drm
+	-Iinclude/drm \
+	-Iinclude/uapi/drm
 
  
 ccflags-y += $(include_dirs)
